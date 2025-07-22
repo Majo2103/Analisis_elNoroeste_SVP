@@ -1,0 +1,164 @@
+---
+title: "Análisis Exploratorio: Desapariciones en Sinaloa"
+author: "Fernanda Muñoz Arroyo"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, echo=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+datos <- read.csv("/Users/fernandamunoz/Documents/SeminarioVyP/sinaloa/datos_limpios.csv", stringsAsFactors = FALSE )
+```
+
+
+```{r grafico1, echo=TRUE, fig.width=8, fig.height=5}
+Sys.setlocale("LC_TIME", "es_ES.UTF-8")
+library(tidyverse)
+library(ggplot2)
+library(lubridate)
+library(dplyr)
+```
+
+```{r grafico1, echo=TRUE, fig.width=8, fig.height=5}
+datos %>%
+  mutate(
+    año = year(fecha_desap),
+    mes_num = month(fecha_desap),
+    fecha_ym = as.Date(paste(año, mes_num, "01", sep = "-"))
+  ) %>%
+  count(fecha_ym) %>%
+  ggplot(aes(x = fecha_ym, y = n)) +
+  geom_col(fill = "#2E86AB") +
+  scale_x_date(date_labels = "%Y-%b", date_breaks = "1 month") +
+  labs(
+    title = "Número de desapariciones por año y mes",
+    x = "Fecha",
+    y = "Número de casos"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r setup, echo=FALSE}
+datos %>%
+  mutate(
+    año = year(fecha_desap),
+    mes_num = month(fecha_desap),
+    fecha_ym = as.Date(paste(año, mes_num, "01", sep = "-"))
+  ) %>%
+  count(fecha_ym)
+```
+
+```{r grafico2, echo=TRUE, fig.width=8, fig.height=5}
+datos %>%
+  count(status) %>%
+  mutate(porc = 100 * n / sum(n),
+         status = fct_reorder(status, porc)) %>%
+  ggplot(aes(x = "", y = porc, fill = status)) +
+  geom_col(width = 1) +
+  coord_polar(theta = "y") +
+  geom_text(aes(label = paste0(round(porc, 1), "%")), 
+            position = position_stack(vjust = 0.5), color = "white", size = 5) +
+  labs(title = "Estatus de personas desaparecidas",
+       fill = "Estatus") +
+  theme_void(base_size = 14) +
+  scale_fill_brewer(palette = "Set2")
+```
+```{r grafico3, echo=TRUE, fig.width=8, fig.height=5}
+datos %>%
+  count(mun) %>%
+  arrange(desc(n)) %>%
+  top_n(20, n) %>%
+  ggplot(aes(x = fct_reorder(mun, n), y = n)) +
+  geom_col(fill = "#D72638") +
+  coord_flip() +
+  labs(title = "Sinaloa: desapariciones registradas por El Noroeste",
+       x = "Municipio",
+       y = "Número de casos") +
+  theme_minimal(base_size = 14)
+
+```
+
+```{r grafico2, echo=TRUE, fig.width=8, fig.height=5}
+datos$fecha_desap <- as.Date(datos$fecha_desap)
+datos$fecha_loc <- as.Date(datos$fecha_loc)
+# solo casos localizados
+loc <- subset(datos, !is.na(fecha_loc) & status != "desaparecido")
+# días entre desaparición y localización
+loc$tiempo_encontrado <- as.numeric(loc$fecha_loc - loc$fecha_desap)
+# según status
+loc$grupo <- ifelse(grepl("sin vida", loc$status, ignore.case = TRUE), "Sin vida", ifelse(grepl("localizado", loc$status, ignore.case = TRUE), "Con vida", NA))
+loc <- subset(loc, !is.na(grupo))
+loc$grupo <- factor(loc$grupo, levels = c("Con vida", "Sin vida"))
+table(loc$grupo)
+
+# Boxplot
+
+ggplot(loc, aes(x = grupo, y = tiempo_encontrado, fill = grupo)) +
+  geom_boxplot() +
+  coord_cartesian(ylim = c(0, 45)) +
+  stat_summary(fun = median, geom = "text", aes(label = round(..y.., 1)),
+               vjust = -0.5, color = "black", size = 3.5) +
+  scale_y_continuous(breaks = seq(0, 200, 10)) +
+  scale_fill_manual(values = c("Con vida" = "lightyellow", "Sin vida" = "lightgreen")) +
+  labs(title = "Días entre desaparición y localización",
+       x = "Estado al ser localizado",
+       y = "Días") +
+  theme_minimal()
+
+
+```
+
+```{r notas, echo=TRUE}
+
+
+# filtrar 
+sub_base <- datos %>%
+  select(nom, edad, sexo, status) %>%
+  filter(!is.na(nom) & !is.na(edad) & !is.na(sexo) & !is.na(status))
+# solo casos localizados
+sub_base <- sub_base %>%
+  filter(status %in% c("localizado", "localizado sin vida"))
+# variable binaria:
+sub_base <- sub_base %>%
+  mutate(localizado_con_vida = ifelse(status == "localizado", 1, 0))
+# regresión 
+modelo_log <- glm(localizado_con_vida ~ edad + sexo , data = sub_base, family = binomial)
+# resumen del modelo
+summary(modelo_log)
+```
+
+
+```{r notas, echo=TRUE}
+sub_base$sexo <- factor(sub_base$sexo)
+levels(sub_base$sexo)
+
+nueva_base <- expand.grid(
+  edad = seq(min(sub_base$edad), max(sub_base$edad), length.out = 100),
+  sexo = levels(sub_base$sexo)  # usar mismos niveles del modelo
+)
+
+# Predecir probabilidades
+nueva_base$prob <- predict(modelo_log, newdata = nueva_base, type = "response")
+
+# Graficar
+ggplot(nueva_base, aes(x = edad, y = prob, color = sexo)) +
+  geom_line(size = 1.2) +
+  labs(
+    title = "Probabilidad localización con vida según edad y sexo",
+    x = "Edad",
+    y = "Probabilidad",
+    color = "Sexo"
+  ) +
+  theme_minimal()
+
+```
+
+
+
+
+
+
+
+
+
